@@ -1,0 +1,654 @@
+# AgentMesh
+
+[![CI](https://github.com/raghuece455/AgentMesh/actions/workflows/ci.yml/badge.svg)](https://github.com/raghuece455/AgentMesh/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-0.5.0-orange.svg)](CHANGELOG.md)
+[![OpenTelemetry GenAI](https://img.shields.io/badge/OpenTelemetry-GenAI%20semconv-blueviolet.svg)](docs/integrations.md)
+[![MCP](https://img.shields.io/badge/MCP-server-black.svg)](docs/mcp.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+**AgentMesh is free, open-source, self-hosted observability and guardrails for AI agents and agent swarms: traces, swarm graphs, sessions, costs, automatic debugging insights, evaluations, alerts, policies, and a kill switch — for agents built with any framework, in Python or TypeScript.**
+
+Agent runs are hard to debug once prompts, tools, retrieval, retries, sub-agents, and humans start influencing each other. AgentMesh records every run as an inspectable trace so you can answer *what happened*, *which step broke first*, *is it looping*, *how much it cost*, and *where the time went*.
+
+> **Bring your own stack.** Point any OpenTelemetry exporter at AgentMesh (OpenAI Agents SDK, Pydantic AI, LangGraph, CrewAI, Vercel AI SDK, ...), add one decorator to plain Python or TypeScript, or auto-instrument the OpenAI and Anthropic clients. Store traces in SQLite or PostgreSQL. No account, no cloud, MIT licensed.
+
+![Trace detail with automatic insights: the first failure and its path, a tool-call loop, repeated prompts, and context growth](https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/trace-insights.png)
+
+<sub>A failed support-agent run, traced over OpenTelemetry: AgentMesh points at the first failing tool call, the refund tool being retried in a loop, and the context growing 5× across model calls.</sub>
+
+---
+
+## What you get
+
+- **Works with any framework** — an OTLP/HTTP receiver (`/v1/traces`, JSON or protobuf) that understands the OpenTelemetry GenAI semantic conventions, OpenInference, OpenLLMetry, and Vercel AI SDK attributes. [Integrations →](docs/integrations.md)
+- **Python SDK** — `@agentmesh.observe`, `agentmesh.trace(session_id=..., user_id=...)`, `agentmesh.score(...)`; sync, async, and generators. [SDK →](docs/sdk.md)
+- **TypeScript SDK** — `npm install agentmesh-sdk`: `observe()`, `trace()`, `score()`, `instrumentOpenAI()`, `instrumentAnthropic()`, and `runExperiment()` for Node.js agents. [TypeScript →](docs/typescript-sdk.md)
+- **Auto-instrumentation** — `instrument_openai()` and `instrument_anthropic()`: Chat Completions, Responses, Embeddings, Messages, streaming, tool calls, cache and reasoning tokens.
+- **Automatic insights** — first failure with its causal path, tool-call loops, repeated identical prompts, runaway context growth, prompt-cache hit rate, self-time and cost hotspots.
+- **Agent swarms** — many agents across traces and processes as one run: who started whom, who messaged whom, per-agent calls and cost, activity over time, failed agents and runaway fan-out, swarm-wide limits (agents, fan-out rate, spend) enforced across processes, and one button to stop the whole swarm. Works over plain OpenTelemetry. [Swarms →](docs/swarms.md)
+- **Sessions and users** — multi-turn conversations grouped by `gen_ai.conversation.id`, with every turn's input, output, and feedback.
+- **Scores and feedback** — thumbs up/down in the dashboard, `POST /api/scores`, SDK scores, and OTel `gen_ai.evaluation.result` events, collected on the **Evaluations** page. [Evaluations →](docs/evaluations.md)
+- **Prompt registry** — every prompt your agents sent, versioned by content hash, with usage, cost, latency, and quality per version, so "which prompt is actually better" is a lookup. [Prompts →](docs/prompts.md)
+- **Datasets and experiments** — turn traces into test cases with one click, run a new prompt or model over them, and compare item by item: what regressed, what improved, what it cost. Gate releases in CI with `agentmesh experiments run --fail-under`. [Evals →](docs/datasets-and-experiments.md)
+- **LLM-as-judge** — `LLMJudge("correctness", judge=...)` with any model, plus exact-match, contains, regex, JSON, and similarity evaluators; score production traces with `evaluate_traces()`.
+- **Egress and data access** — every host your agents reached and every store they read, from HTTP spans, URLs in tool arguments, retrievals and memory; new destinations flagged; and an allowlist rule that blocks a call to an unapproved domain before it is made. [Access →](docs/access.md)
+- **Guardrails and kill switch** — policies that block, pause, or limit tool calls, LLM calls, and agents *before they run*: stop tool loops, runaway spend, production deletes, unapproved models, and swarm fan-out; try a policy in `monitor` mode or simulate it on recorded traces first; halt a trace, an agent, a service, a swarm, or everything in one click. [Guardrails →](docs/guardrails.md)
+- **Human approvals** — a `require_approval` rule pauses the call and puts it on the **Approvals** page with its arguments; the agent waits (without blocking the event loop in async code) until someone approves or rejects, or the request times out. [Approvals →](docs/approvals.md)
+- **Alerts** — Slack, Discord, or signed webhook notifications for failure spikes, spend, expensive traces, p95 latency, agents stuck in tool loops, swarms that grow or spend too fast, agents looping between each other, and hosts reached for the first time. [Alerts →](docs/alerts.md)
+- **Accurate cost tracking** — per-million-token pricing with cache-read/cache-write rates, current Claude, GPT, and Gemini prices built in, `agentmesh pricing sync` for everything else.
+- **MCP server** — `agentmesh mcp` lets Claude Code, Cursor, or any MCP client list, inspect, diagnose, and score your traces, compare experiments, and check alerts. [MCP →](docs/mcp.md)
+- **SQLite or PostgreSQL** — SQLite for a zero-setup local install; `AGENTMESH_DB_URL=postgresql://...` for a shared team server, with every feature on both.
+- **Replay and time travel** — deterministic replay and checkpoint forking for workflows built with the AgentMesh runtime.
+- **Privacy and retention** — secret redaction, `AGENTMESH_CAPTURE_CONTENT=false`, content truncation, `agentmesh traces prune --older-than 30d`.
+- **Optional runtime** — AgentMesh also includes an async multi-agent runtime (workflows, tools with approval gates, budgets, RAG, memory) if you want orchestration and observability in one package.
+
+### How it fits together
+
+```mermaid
+flowchart LR
+    subgraph sources["Your agents"]
+        A["OpenTelemetry frameworks<br/>OpenAI Agents SDK, Pydantic AI,<br/>LangGraph, CrewAI, Vercel AI SDK"]
+        B["Python and TypeScript SDKs<br/>observe(), trace()"]
+        C["OpenAI and Anthropic clients<br/>instrument_openai()"]
+        D["AgentMesh runtime<br/>Workflow and Agent"]
+    end
+    B -.->|"checked before every tool call,<br/>LLM call, and agent start"| G["Guardrails: policies,<br/>limits, approvals, halts"]
+    C -.-> G
+    D -.-> G
+    A -- "OTLP /v1/traces" --> M["Ingest and GenAI<br/>semantic mapping"]
+    B -- "SDK" --> M
+    C -- "SDK" --> M
+    M --> S[("SQLite or PostgreSQL<br/>traces, sessions, scores, datasets,<br/>swarms, policies, access records")]
+    D --> S
+    S -- "policies and halts" --> G
+    G -- "decisions" --> S
+    S --> I["Insights: root cause, loops,<br/>context growth, cost hotspots"]
+    S --> W["Swarms: agent graph, swarm-wide<br/>limits, egress and data access"]
+    S --> E["Experiments and<br/>LLM-as-judge evaluators"]
+    S --> AL["Alert rules: runs, swarms,<br/>new destinations"]
+    AL -- "Slack, Discord, webhook" --> N["Notifications"]
+    I --> UI["Dashboard"]
+    W --> UI
+    E --> UI
+    I --> MCP["MCP server<br/>Claude Code, Cursor"]
+    I --> CLI["CLI and REST API"]
+```
+
+Everything above the database is observation; **Guardrails** is the one part that runs *before* your agent acts, so a policy can stop a call instead of reporting it. [Governance →](docs/governance.md)
+
+---
+
+## Observe an existing agent in 60 seconds
+
+```bash
+pip install "agentmesh-ai[otlp]"
+agentmesh dashboard            # http://127.0.0.1:8787 — OTLP endpoint at /v1/traces
+```
+
+> The PyPI package includes the full React dashboard. Add `[postgres]` for PostgreSQL storage. To run unreleased changes from GitHub, see [Quickstart from source](#quickstart-from-source).
+
+**Option A — any OpenTelemetry-instrumented framework:**
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:8787"
+python my_agent.py
+```
+
+**Option B — plain Python with the SDK:**
+
+```python
+import agentmesh
+
+agentmesh.init(service_name="support-bot")     # writes to the local AgentMesh database
+agentmesh.instrument_anthropic()               # and/or agentmesh.instrument_openai()
+
+@agentmesh.observe(kind="tool")
+def lookup_order(order_id: str) -> dict: ...
+
+@agentmesh.observe(kind="agent")
+def support_agent(question: str) -> str: ...
+
+with agentmesh.trace("support-turn", session_id="chat-42", user_id="u-7"):
+    answer = support_agent("Where is my order?")
+    agentmesh.score("resolved", True)
+```
+
+Try it offline: `python examples/sdk_quickstart.py`, then open the **Sessions** and **Traces** pages.
+
+**Option C — TypeScript / Node.js:**
+
+```ts
+import OpenAI from "openai";
+import { init, instrumentOpenAI, observe, trace } from "agentmesh-sdk";   // npm install agentmesh-sdk
+
+init({ serviceName: "support-bot" });                 // sends to http://127.0.0.1:8787
+const openai = instrumentOpenAI(new OpenAI());
+const lookupOrder = observe(async (id: string) => ({ id, status: "shipped" }), { kind: "tool", name: "lookup_order" });
+
+await trace("support-turn", { sessionId: "chat-42" }, async () => lookupOrder("A-1001"));
+```
+
+**Option D — ask your coding agent:**
+
+```bash
+claude mcp add agentmesh -- agentmesh mcp --db /absolute/path/.agentmesh/agentmesh.db
+# "Diagnose the most recent failed trace"
+```
+
+---
+
+## Test changes before you ship them
+
+Save good (and bad) production answers as a dataset, run the new version over it, and compare:
+
+```python
+from agentmesh import Contains, LLMJudge
+
+result = agentmesh.run_experiment(
+    "support-regressions",                      # built from traces with "Add to dataset"
+    task=support_agent_v2,
+    evaluators=[Contains(), LLMJudge("correctness", judge=call_my_llm)],
+    name="prompt-v2",
+)
+print(result.format_summary())
+```
+
+```bash
+# In CI: fail the build if quality drops or any item regresses against the last release
+agentmesh experiments run --dataset support-regressions --task app.py:support_agent_v2 \
+  --evaluator contains --fail-under contains=0.9 --baseline exp_1234 --fail-on-regression
+```
+
+And get told when production misbehaves:
+
+```bash
+agentmesh alerts add --name "tool loops" --kind loop_detected --threshold 4 --webhook https://hooks.slack.com/services/...
+agentmesh alerts add --name "checkout failures" --kind failure_rate --threshold 0.2 --window 15m --workflow checkout
+agentmesh alerts add --name "unknown egress" --kind new_destination --threshold 1 --access-kind network
+```
+
+Try both offline: `python examples/datasets_experiments.py`, then open **Datasets & Evals** and **Alerts**.
+
+---
+
+## See a swarm as one run
+
+A planner fans work out to researchers in other processes; they report to a writer. Each worker is its own trace, so trace by trace the run is invisible. Group them into a swarm:
+
+```python
+with agentmesh.swarm("market research"):
+    with agentmesh.trace("orchestrator"):
+        context = agentmesh.swarm_context()            # send with each task
+
+# in each worker process
+with agentmesh.trace("research", spawned_by=task.context):
+    researcher(task)                                   # @agentmesh.observe(kind="agent")
+    agentmesh.send_message("writer", notes)
+```
+
+The **Swarms** page draws the agent graph across traces (grouped by role for swarms of hundreds of agents), charts agents running over time, flags failed agents, runaway fan-out, deep nesting, and cost hotspots, and has a **Stop swarm** button that halts every agent in it. A policy can cap the swarm itself — total agents, agents running at once, agents started per minute, spend, tokens, runtime — counted across every process, and AgentMesh halts a swarm that goes past them. No SDK? Set the `agentmesh.swarm.id` resource attribute and add a span link to the spawning span. Try it offline: `python examples/agent_swarm.py`.
+
+![Swarm view: activity over time, insights, and the agent graph](https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/swarm.png)
+
+---
+
+## Know what your agents touched
+
+After an incident the two questions are always the same: *did it talk to anything it shouldn't have?* and *what data did it read first?* AgentMesh answers both from the traces you already send — no extra SDK calls — by reading hosts out of HTTP spans and the URLs in tool arguments, plus retrievals, memory operations, databases, and files.
+
+```bash
+agentmesh access summary --kind network     # every host reached, most used first, new ones flagged
+agentmesh alerts add --name "unknown egress" --kind new_destination --threshold 1 --access-kind network
+```
+
+The **Access** page flags anything reached for the first time in the range, a trace shows a **Reached** card, and a swarm gets an **Access** tab. To stop a call instead of recording it, a policy rule matching on `host` is an allowlist enforced before the request is made. [Access →](docs/access.md)
+
+---
+
+## Stop agents that misbehave
+
+Observability shows you the loop after it happened. Guardrails stop it while it happens. Policies are checked before every tool call, LLM call, and agent start:
+
+```yaml
+name: production-safety
+mode: enforce                  # or monitor: record what would be blocked, block nothing
+limits:
+  max_repeated_calls: 3        # the same tool with the same arguments: a loop
+  max_cost_usd: 5              # per trace
+  max_child_agents: 10         # swarm fan-out
+rules:
+  - name: no-production-deletes
+    match: {tool: "delete_*", arguments: {env: production}}
+    action: deny
+  - name: refunds-need-approval
+    match: {tool: issue_refund}
+    action: require_approval   # waits for a reviewer on the Approvals page
+  - name: approved-domains-only
+    match: {kind: tool, host: "*"}            # only calls that reach a host at all
+    except: {host: ["*.mycompany.com", "api.openai.com"]}
+    action: deny               # an egress allowlist, checked before the request is made
+```
+
+```bash
+agentmesh policy simulate policy.yaml --hours 24     # what would it have blocked yesterday?
+agentmesh policy apply policy.yaml
+agentmesh halt create --service support-bot --reason "Refund loop"   # kill switch
+```
+
+A blocked call raises `agentmesh.PolicyViolation` inside the agent, a paused one waits on the **Approvals** page, and every decision shows up on the trace and the **Guardrails** page. Enforced in the Python SDK, OpenAI/Anthropic instrumentation, and the AgentMesh runtime; TypeScript SDK enforcement is next. Try it offline: `python examples/guardrails.py`.
+
+![Guardrails: policies in enforce and monitor mode, recent decisions, and an active halt](https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/guardrails.png)
+
+---
+
+## Quickstart from source
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/raghuece455/AgentMesh.git
+cd AgentMesh
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[otlp]"
+python -m agentmesh.cli demo seed --reset
+python -m agentmesh.cli dashboard --host 127.0.0.1 --port 8790
+```
+
+### macOS/Linux
+
+```bash
+git clone https://github.com/raghuece455/AgentMesh.git
+cd AgentMesh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[otlp]"
+python -m agentmesh.cli demo seed --reset
+python -m agentmesh.cli dashboard --host 127.0.0.1 --port 8790
+```
+
+Open [http://127.0.0.1:8790](http://127.0.0.1:8790) — you'll see the full dashboard with seeded demo traces.
+
+In a second terminal, run real examples against the live dashboard:
+
+```bash
+AGENTMESH_DB_URL=.agentmesh/agentmesh.db python examples/sdk_quickstart.py   # SDK tracing, no API keys
+python examples/hello_agent.py
+python examples/researcher_writer_reviewer.py
+python examples/tool_calling_agent.py
+python examples/rag_document_qa.py
+python examples/failed_run_debugging.py
+```
+
+See [Setup.md](Setup.md) for the full setup guide including provider configuration, Docker, and PostgreSQL.
+
+---
+
+## Docker (one command)
+
+```bash
+docker compose up --build
+```
+
+Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Demo data is seeded on start (set `AGENTMESH_DEMO_SEED=false` to keep your own traces). The port is published on localhost only; before exposing it, set `AGENTMESH_AUTH_MODE=api_key` and `AGENTMESH_API_KEY` in `.env` — see [docs/docker.md](docs/docker.md).
+
+---
+
+## Built-in Runtime Example
+
+If you are starting a new project, the AgentMesh runtime gives you orchestration with tracing, budgets, approvals, and replay built in:
+
+```python
+import asyncio
+
+from agentmesh import Agent, MockModelProvider, Workflow, WorkflowMode
+
+
+async def main() -> None:
+    provider = MockModelProvider(["Draft plan", "Final answer"])
+    workflow = Workflow("hello-team", mode=WorkflowMode.SEQUENTIAL)
+    workflow.add_agent(Agent("planner", "Planner", "Create a short plan.", provider))
+    workflow.add_agent(Agent("writer", "Writer", "Write the final answer.", provider))
+    workflow.add_step("planner", "Plan a launch checklist")
+    workflow.add_step("writer", "Turn the plan into a concise response")
+
+    result = await workflow.run({"goal": "ship a demo"})
+    print(result.trace_id)
+    print(result.output)
+
+
+asyncio.run(main())
+```
+
+Replace `MockModelProvider` with `OpenAICompatibleProvider`, `AnthropicProvider`, `OllamaProvider`, or any other provider — traces look identical regardless of which model you use.
+
+---
+
+## Dashboard
+
+The local dashboard is built around production debugging workflows, with a command palette (Ctrl/⌘ K), a global time range, and light and dark themes:
+
+| Page | What you get |
+|---|---|
+| **Overview** | KPI cards with sparklines (traces, error rate, p95 latency, tokens, cost), trace volume and latency charts, failures grouped into issues, spend by model, provider health |
+| **Traces** | Dense searchable table with shareable filters and CSV export; a trace view with the span tree and waterfall in one searchable timeline, automatic insights, a span panel with chat-style input/output, side-by-side comparison with another run, keyboard navigation, export, replay |
+| **Swarms** | Swarm runs across traces and processes: an agent graph (or role graph for large swarms), activity over time, insights, agents, messages, and Stop swarm |
+| **Sessions** | Multi-turn conversations: every turn's input, output, status, cost, and feedback in order |
+| **Datasets** | Datasets built from traces or by hand, experiment runs with per-evaluator scores, and item-by-item comparison of two runs |
+| **Evaluations** | Every score on your traces — from evaluators, LLM judges, and people — with what was judged and why |
+| **Prompts** | Prompt versions with usage, cost, latency, and quality per version, so you can see which one is actually better |
+| **Access** | Hosts agents reached and data they read, with new destinations flagged, per-agent drill-down, and links to the run |
+| **Guardrails** | Policies with a YAML editor, templates, and simulation on recorded traces; blocked, approval, and would-block decisions; swarm-limit usage; a kill switch for a trace, an agent, a service, a swarm, or everything |
+| **Approvals** | The review queue: risky tool calls paused by a `require_approval` rule, with their arguments, the agent that asked, and Approve/Reject |
+| **Alerts** | Alert rules with live state, one-click test notifications, and alert history; run, swarm, and egress anomaly kinds |
+| **Connect** | Your OTLP endpoint and copy-paste setup for OpenTelemetry, the Python and TypeScript SDKs, OpenAI Agents SDK, Pydantic AI, and MCP |
+| **Workflows** | Node graph with agent/task/model/tool/memory/approval nodes, status, retries, cost, latency |
+| **Agents** | Role, model/provider, cost/token trends, tool calls, memory operations, errors |
+| **Models** | Provider health, calls, token split, cost, latency, p95, error rate, rate limits |
+| **Costs** | Spend today/week/month, budget used/remaining, failed-run waste, cache savings |
+| **Tools** | Tool call inspector with permissions, approval status, side effects, sandbox logs |
+| **Memory & RAG** | Memory operations, versioned records, retrieved chunks, similarity scores, source metadata |
+| **Replay** | Deterministic replay of a whole trace or from a selected span; simulated and live modes from the CLI/API |
+| **Settings** | Budgets, provider configuration, and the audit log |
+
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/sessions.png" alt="Sessions page: a three-turn support conversation with inputs, outputs, status, and user feedback per turn"><br><b>Sessions</b> — every turn of a conversation, with feedback</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/trace-detail-cockpit.png" alt="Trace detail: duration, spans, tokens, and cost, insights, a combined span tree and waterfall timeline, and the selected LLM span's details"><br><b>Trace detail</b> — timeline, insights, span details</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/overview-trace-launchpad.png" alt="Overview: KPI cards for traces, error rate, p95 latency, tokens, and cost, trace volume and latency charts, grouped issues, and spend by model"><br><b>Overview</b> — KPIs, trends, issues, spend by model</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/workflow-graph.png" alt="Workflow graph: agent, model, and tool nodes with status, latency, cost, and tokens"><br><b>Workflow graph</b> — agents, model calls, and tools as nodes</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/experiment-compare.png" alt="Experiment comparison: two prompt versions over the same dataset, with regressed and improved items, score deltas, and links to each trace"><br><b>Experiments</b> — what a change improved and what it broke</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/alerts.png" alt="Alerts page: rules for failed runs, expensive traces, tool loops, spend, swarm size, and new destinations, with firing state and recent notifications"><br><b>Alerts</b> — failures, spend, loops, swarm anomalies, and new destinations, to Slack or a webhook</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/guardrails.png" alt="Guardrails page: policies in enforce and monitor mode, blocked and would-block decisions, and an active halt stopping every agent"><br><b>Guardrails</b> — policies, decisions, and the kill switch</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/approvals.png" alt="Approvals page: two refunds paused by a require_approval rule, with their arguments, the agent that asked, and Approve and Reject buttons"><br><b>Approvals</b> — risky calls waiting for a person</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/access.png" alt="Access page: hosts agents reached and stores they read, with new destinations flagged, accesses, agents, errors, and last use"><br><b>Access</b> — what your agents reached, and what is new</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/cost-center.png" alt="Costs: spend today, this week, and this month, projected spend, failed-run waste, budget progress, spend over time, and token mix"><br><b>Costs</b> — spend, budget, failed-run waste, cost by model</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/connect.png" alt="Connect page: OTLP endpoint and setup snippets for OpenTelemetry, the Python SDK, OpenAI Agents SDK, and Pydantic AI"><br><b>Connect</b> — endpoint and copy-paste setup for your stack</td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/raghuece455/AgentMesh/main/dashboard/screenshots/replay-studio.png" alt="Replay studio: a recorded trace re-run step by step, with the original and replayed output side by side"><br><b>Replay</b> — re-run a trace from what was recorded</td>
+  </tr>
+</table>
+
+---
+
+## Architecture
+
+```
+AgentMesh
+├── Ingestion         OTLP/HTTP receiver (JSON + protobuf), GenAI semconv / OpenInference / OpenLLMetry mapping
+├── SDKs              Python and TypeScript: observe, trace, span, score, OpenAI + Anthropic auto-instrumentation
+├── Analysis          Root cause, loop detection, context growth, cache usage, hotspots
+├── Swarms            Membership by attribute or span link, agent graph, messages, swarm-wide limits
+├── Guardrails        Policy engine, per-trace and swarm limits, approvals, kill switch, egress allowlists
+├── Access            Hosts agents reached and data they read, derived from spans at ingest
+├── Evaluation        Datasets, experiments, comparisons, built-in and LLM-as-judge evaluators
+├── Alerts            Rule scheduler, run / swarm / egress anomaly kinds, Slack / Discord / signed webhooks
+├── MCP Server        Traces as tools for coding agents
+├── Core Runtime      Agents, Tasks, Workflows, Scheduler, Event Bus
+├── Observability     Tracing, Metrics, Logs, Replay, Cost Tracking, OpenTelemetry
+├── Tool Layer        MCP Proxy, Sandboxed Commands, Permissions, Human Approval
+├── Memory Layer      Workflow Memory, Long-term Memory, Vector Store, Checkpoints
+├── Model Providers   OpenAI-compatible, Ollama, Anthropic, Gemini, vLLM, Router
+├── Dashboard         Overview, Traces, Sessions, Swarms, Datasets, Alerts, Access, Guardrails, Approvals, Costs, Replay
+└── SDK + CLI
+```
+
+Key components:
+
+- `Workflow` — schedules steps and owns the run context.
+- `WorkflowScheduler` — executes sequential, parallel, dependency-aware, hierarchical, and event-driven workflows.
+- `Agent` — receives typed `AgentMessage` objects, executes tools, calls a model provider, returns an `AgentResult`.
+- `TraceRecorder` — writes every event to `SQLiteStore` or `PostgreSQLStore` (the same queries on both; see [docs/configuration.md](docs/configuration.md#postgresql)).
+- `ReplayEngine` — reconstructs prompts, outputs, tools, agent interactions, memory state, and checkpoints.
+- `TimeTravelDebugger` — inspects and forks workflow memory from checkpoints.
+- `FailedRunDiagnosis` — classifies failed runs from retries, errors, and budget events.
+- `PolicyEngine` — pure, testable evaluation of rules and limits; `Guardrails` applies it before every tool call, LLM call, and agent start, and `simulate()` replays a draft policy over recorded traces.
+- `SwarmLimitScheduler` — counts a swarm's agents, spend, and spawn rate across every process on the server and halts one that breaks its policy.
+- `ToolRegistry` — enforces permissions and optional human approval before execution.
+- `PluginManager` — registers custom tools, model providers, agents, planners, and evaluators.
+
+---
+
+## Technology Stack
+
+| Layer | Implementation |
+|---|---|
+| Core | Python 3.11+ |
+| API | FastAPI |
+| Dashboard frontend | React 19 + TypeScript + TailwindCSS + Recharts + React Flow |
+| Workflow engine | AsyncIO |
+| Messaging | In-memory event bus; optional Redis and NATS adapters |
+| Database | SQLite (default) or PostgreSQL 14+, with the same features on both |
+| SDKs | Python; TypeScript/JavaScript (`agentmesh-sdk`, Node.js 18+) |
+| Vector DB | FAISS adapter; SQLite vector fallback |
+| Tracing | OTLP/HTTP ingestion (OpenTelemetry GenAI semantic conventions); OTEL JSON export |
+| Packaging | `pyproject.toml` with uv-compatible dependency groups and extras |
+| Testing | pytest (SQLite and PostgreSQL), node:test for the TypeScript SDK |
+| Containerization | Dockerfile + Docker Compose |
+
+---
+
+## Provider Support
+
+| Provider | Status |
+|---|---|
+| Mock (deterministic tests/CI) | ✅ included |
+| OpenAI-compatible (`/chat/completions`) | ✅ included |
+| Azure OpenAI | ✅ via `OpenAICompatibleProvider` |
+| Anthropic Messages API | ✅ included |
+| Google Gemini | ✅ included |
+| Ollama (local models) | ✅ included |
+| vLLM (OpenAI-compatible) | ✅ included |
+| Custom provider | ✅ implement `ModelProvider` |
+| Model router (cheap/local/coding routes) | ✅ included |
+
+```bash
+pip install -e ".[production]"   # all production adapters
+pip install -e ".[postgres]"     # PostgreSQL only
+pip install -e ".[redis]"        # Redis event bus
+pip install -e ".[nats]"         # NATS event bus
+pip install -e ".[faiss]"        # FAISS vector store
+pip install -e ".[otel]"         # OpenTelemetry export
+pip install -e ".[otlp]"         # accept OTLP protobuf on /v1/traces
+```
+
+---
+
+## Examples
+
+Runnable examples covering all major features:
+
+```
+examples/
+├── sdk_quickstart.py               # Trace plain Python with the SDK (offline)
+├── datasets_experiments.py         # Traces -> dataset -> two versions -> comparison (offline)
+├── guardrails.py                   # Block, break a loop, approve, and halt with a policy (offline)
+├── agent_swarm.py                  # A planner, 12 researchers in workers, a writer: one swarm (offline)
+├── policies/                       # Ready-to-apply policy files: production safety, swarm limits
+├── otel_genai_export.py            # Standard OpenTelemetry GenAI spans -> AgentMesh
+├── llm_client_auto_instrumentation.py  # instrument_openai() / instrument_anthropic()
+├── hello_agent.py                  # Single-agent workflow
+├── researcher_writer_reviewer.py   # 3-agent sequential pipeline
+├── parallel_multi_agent.py         # Parallel execution
+├── tool_calling_agent.py           # Agent with typed tools
+├── rag_document_qa.py              # RAG with tracing
+├── human_approval_workflow.py      # Approval gates
+├── cost_budget_workflow.py         # Budget constraints
+├── failed_run_debugging.py         # Failure diagnosis
+├── time_travel_debugging.py        # Replay from checkpoint
+├── multi_model_routing.py          # Dynamic provider routing
+├── ollama_local_model.py           # Local LLM
+├── openai_compatible_provider.py   # Generic OpenAI API
+└── ...
+sdks/typescript/examples/
+├── quickstart.mjs                  # Trace a Node.js agent with sessions and scores
+└── experiment.mjs                  # Run and grade an experiment from TypeScript
+```
+
+---
+
+## CLI
+
+```bash
+agentmesh init
+agentmesh run examples/research_team.py
+agentmesh dashboard                                   # also serves OTLP at /v1/traces
+agentmesh mcp                                         # MCP server over stdio
+agentmesh demo seed
+agentmesh ingest trace.otlp.json                      # import an OTLP/JSON file
+agentmesh sessions list
+agentmesh swarms list                                 # agent swarms; agentmesh swarms show <swarm_id>
+agentmesh swarms check                                # evaluate swarm-wide limits now (the server also does this)
+agentmesh access summary                              # hosts reached and stores read; --kind network
+agentmesh access list --target pastebin --exact       # every access to one destination
+agentmesh sessions show <session_id>
+agentmesh traces list
+agentmesh traces show <trace_id>
+agentmesh traces insights <trace_id>                  # root cause, loops, context growth, hotspots
+agentmesh traces prune --older-than 30d [--dry-run]
+agentmesh datasets import support-regressions items.jsonl
+agentmesh datasets add-trace support-regressions <trace_id>
+agentmesh experiments run --dataset support-regressions --task app.py:answer --evaluator exact_match --fail-under exact_match=0.9
+agentmesh experiments compare <baseline_id> <candidate_id>
+agentmesh alerts add --name "daily spend" --kind cost --threshold 50 --window 1d --webhook <url>
+agentmesh alerts add --name "unknown egress" --kind new_destination --threshold 1 --access-kind network
+agentmesh alerts check                                # evaluate rules once (e.g. from cron)
+agentmesh policy apply policy.yaml                    # guardrails: block, pause, or limit agents
+agentmesh policy simulate policy.yaml --hours 24      # what a policy would have blocked
+agentmesh policy decisions --status blocked           # what it actually blocked
+agentmesh halt create --service support-bot           # kill switch; agentmesh halt release <id>
+agentmesh halt create --swarm <swarm_id>              # stop every agent in a swarm, in every process
+agentmesh pricing show claude-sonnet-5
+agentmesh pricing sync
+agentmesh traces export <trace_id> --out trace.json
+agentmesh traces export <trace_id> --format otel-json --out trace.otel.json
+agentmesh replay <trace_id> --mode deterministic
+agentmesh replay <trace_id> --mode simulated
+agentmesh replay <trace_id> --mode live --allow-side-effects
+agentmesh diagnose <trace_id>
+agentmesh costs summary
+agentmesh costs summary --dimension model
+agentmesh checkpoints list <trace_id>
+agentmesh checkpoints show <checkpoint_id>
+agentmesh doctor
+agentmesh validate traces
+agentmesh version
+```
+
+---
+
+## Security Model
+
+- Secrets (API keys, bearer tokens, private keys, credentials in URLs) are redacted before traces are stored, exported, or mirrored to a collector.
+- Optional API-key auth (`AGENTMESH_AUTH_MODE=api_key`) covers the dashboard, REST API, live event stream, WebSocket, and `/v1/traces`; the dashboard prompts for the key.
+- `AGENTMESH_CAPTURE_CONTENT=false` keeps prompt/response text, tool arguments, and retrieval queries out of storage; `/v1/traces` enforces a request size limit.
+- Tools declare permission levels (`READ`, `WRITE`, `EXECUTE`, `SENSITIVE`), and sensitive tools can require human approval before execution.
+- Policies can deny a call, pause it for human approval, or cap a trace or a whole swarm *before* it runs; a `host` rule is an egress allowlist enforced before the request is made.
+- Tool execution, memory writes, policy decisions, approvals, halts, and halt releases create audit records; `agentmesh traces prune` enforces retention and deletes swarm, policy, and access rows with their traces.
+- Alert webhooks can be signed (HMAC-SHA256), never follow redirects, and their URLs and secrets are masked in the API and dashboard.
+
+See [SECURITY.md](SECURITY.md) for the full security policy and reporting instructions.
+
+---
+
+## Project Status
+
+`v0.5.0` — alpha. Ingestion, SDK, dashboard, guardrails, and runtime are ready for local development, evaluation, and single-team self-hosting.
+
+**Implemented — observe:** OTLP/HTTP trace ingestion with GenAI semantic-convention mapping, Python and TypeScript tracing SDKs, OpenAI and Anthropic auto-instrumentation, sessions/users/tags, scores and feedback, automatic trace insights, agent swarms across traces and processes (graph, roles, messages, insights), egress and data-access records, per-MTok pricing with cache rates and community price sync, retention pruning, SQLite and PostgreSQL storage.
+
+**Implemented — evaluate:** datasets, experiments, comparisons, built-in and LLM-as-judge evaluators, prompt versions, CI gating.
+
+**Implemented — control:** policy engine with per-trace and swarm-wide limits, `monitor` mode and simulation on recorded traces, blocking human approvals, a kill switch for a trace / agent / service / swarm / everything, host allowlists that block egress before the call, and alerts for run, swarm, and new-destination anomalies over Slack, Discord, or signed webhooks.
+
+**Also:** MCP server, React dashboard (20 pages), AgentMesh runtime, CLI, Docker, CI.
+
+**Partial:** Dashboard auth is API-key only (no user accounts); guardrails are enforced in the Python SDK, the OpenAI/Anthropic instrumentation, and the runtime — TypeScript SDK enforcement is next; the alert and swarm-limit schedulers run inside one server process; no gRPC OTLP receiver (use a Collector).
+
+**Planned:** guardrails in the TypeScript SDK, OTLP logs, ClickHouse for very high trace volumes and very large swarms, scheduled online evaluation on the server, more client auto-instrumentation, login and RBAC. See [ROADMAP.md](ROADMAP.md).
+
+---
+
+## FAQ
+
+**Do I have to build my agent with AgentMesh?**
+No. Send OpenTelemetry traces from any framework, wrap your own code with `@agentmesh.observe`, or instrument the OpenAI/Anthropic clients. The runtime is optional.
+
+**Does my data leave my machine?**
+Not unless you send it somewhere. Traces go to a local SQLite file, the dashboard runs locally, and AgentMesh has no telemetry of its own. Set `AGENTMESH_CAPTURE_CONTENT=false` to keep prompt and response text out of storage entirely.
+
+**Can AgentMesh actually stop an agent, or only watch it?**
+It can stop it. Policies are evaluated *before* each tool call, LLM call, and agent start, so a denied call raises `PolicyViolation` instead of running, a `require_approval` call waits for a person, and a halt stops every agent in a trace, an agent, a service, or a whole swarm — in every process that runs guardrails. Swarm-wide limits are counted on the server, so 200 workers cannot each obey a limit and still blow through it together. Enforcement lives in the Python SDK, the OpenAI/Anthropic instrumentation, and the runtime today. A `host` rule blocks a request before it is made, but it reads the call AgentMesh is given — for hard network isolation, pair it with an egress proxy. See [docs/guardrails.md](docs/guardrails.md).
+
+**Is it really free?**
+Yes, MIT licensed, with no paid tier or usage limits. You pay only your model providers.
+
+**How accurate are the costs?**
+Token counts come from the provider responses. Prices are list prices per million tokens, including prompt-cache read/write rates; `agentmesh pricing show <model>` tells you which rule applied, and `agentmesh pricing sync` refreshes prices for models not built in. Batch discounts and negotiated rates are not applied; override them with `AGENTMESH_PRICING_JSON`.
+
+**Can my team share one instance?**
+Yes: run it with `AGENTMESH_AUTH_MODE=api_key` and `AGENTMESH_DB_URL=postgresql://...` behind a TLS reverse proxy and point everyone's exporters at it. There are no per-user accounts yet.
+
+**How do I know a prompt or model change didn't make things worse?**
+Save representative traces to a dataset (**Add to dataset** on any trace), then run `agentmesh.run_experiment` (or `agentmesh experiments run` in CI) for the old and new version and compare them in **Datasets & Evals**. See [docs/datasets-and-experiments.md](docs/datasets-and-experiments.md).
+
+**My agents are in TypeScript. Does this work?**
+Yes. Use `agentmesh-sdk` from npm, or any OpenTelemetry exporter (the Vercel AI SDK's telemetry works as-is). See [docs/typescript-sdk.md](docs/typescript-sdk.md).
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, development workflow, and contribution areas.
+
+Good first issues are labeled [`good first issue`](https://github.com/raghuece455/AgentMesh/issues?q=label%3A%22good+first+issue%22) in the issue tracker.
+
+---
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/integrations.md](docs/integrations.md) | Trace any framework over OpenTelemetry — recipes and attribute mapping |
+| [docs/sdk.md](docs/sdk.md) | Python SDK and OpenAI/Anthropic auto-instrumentation |
+| [docs/typescript-sdk.md](docs/typescript-sdk.md) | TypeScript/JavaScript SDK (`agentmesh-sdk`) |
+| [docs/datasets-and-experiments.md](docs/datasets-and-experiments.md) | Datasets, experiments, evaluators, LLM-as-judge, CI gating |
+| [docs/swarms.md](docs/swarms.md) | Agent swarms across traces and processes: SDK, OpenTelemetry attributes, swarm graph, stopping a swarm |
+| [docs/access.md](docs/access.md) | Egress and data access: what agents reached, and allowlists that block a call before it is made |
+| [docs/guardrails.md](docs/guardrails.md) | Policies, limits, approvals, simulation, and the kill switch |
+| [docs/approvals.md](docs/approvals.md) | Human review for risky tool calls, in the SDK, runtime, and dashboard |
+| [docs/governance.md](docs/governance.md) | How the control features fit together: audit, limits, and what agents may do |
+| [docs/alerts.md](docs/alerts.md) | Alert rules and Slack / Discord / webhook notifications |
+| [docs/mcp.md](docs/mcp.md) | MCP server for Claude Code, Cursor, and other MCP clients |
+| [Setup.md](Setup.md) | Full setup guide — providers, Docker, PostgreSQL, troubleshooting |
+| [HOW_IT_WORKS.md](HOW_IT_WORKS.md) | Deep dive — architecture, sequence diagrams, data flow, use cases |
+| [ROADMAP.md](ROADMAP.md) | What shipped in v0.4 and v0.5, and what is planned for v0.6 and v1.0 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute — setup, dev principles, adding providers |
+| [docs/](docs/) | Reference docs — agents, tools, memory, CLI, dashboard, OTEL |
+
+---
+
+## Community
+
+- [GitHub Discussions](https://github.com/raghuece455/AgentMesh/discussions) — questions, ideas, show and tell
+- [GitHub Issues](https://github.com/raghuece455/AgentMesh/issues) — bug reports and feature requests
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
+
+If AgentMesh is useful to you, a ⭐ on GitHub helps others find it.
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

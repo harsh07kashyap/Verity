@@ -1,0 +1,229 @@
+# Changelog
+
+All notable changes to AgentMesh are documented here. AgentMesh follows [Semantic Versioning](https://semver.org/) and this file follows [Keep a Changelog](https://keepachangelog.com/).
+
+---
+
+## [Unreleased]
+
+### Changed
+- **Ingest only appends.** Recording spans no longer updates or deletes any row: a swarm's window and name are appended per batch and folded when the swarm is read, a root span that arrives after its children renames the run without rewriting that trace's spans and cost records, and a provisional workflow whose name was superseded is filtered out of the Workflows list instead of deleted during ingest. Groundwork for a column-store backend, and fewer writes per batch on SQLite and PostgreSQL too. Schema migration 7 drops the primary key on `swarms`.
+- Cost by workflow reads the name from the run rather than from each cost record, so a trace renamed by a late root span is grouped under its settled name.
+- A workflow with no runs is no longer listed. One is only ever catalogued together with a run, so this can only be a provisional name that a later root span replaced.
+- **Finishing a run supersedes its rows** rather than rewriting a few columns of them, so nothing written per span or per trace is updated in place any more. Provider health is recomputed when it is read, which is the only time anything looks at it, instead of on every model call.
+- `agentmesh.backends` records how each table's rows change — appended, replaced by key, or rewritten in place — and the test suite checks the code against it, so a new table or a new in-place update has to say which it is.
+
+---
+
+## [0.5.0] — 2026-09-17
+
+Agents you can stop, not just watch. Guardrails check a policy before every tool call, LLM call, and agent start; risky calls wait for a person; a kill switch halts a trace, an agent, a service, or a whole swarm. Agent swarms become a first-class run across traces and processes, with limits counted over every process in them. AgentMesh records what agents reached and what data they read, and blocks a call to an unapproved host before it is made. Alerts fire on all of it. `agentmesh-sdk` 0.5.0 is published to keep the versions aligned; the TypeScript SDK code is unchanged and guardrail enforcement there is next.
+
+### Added
+- **Swarm and egress anomaly alerts.** Six new alert kinds: `new_destination` (a host or store nothing had reached before), `swarm_agents`, `swarm_spawn_rate`, `swarm_cost`, `swarm_errors`, and `swarm_loop` (two agents handing work back and forth). They notify once per offending destination or swarm, scope with the `swarm` and `access_kind` filters, and link straight to the swarm. Limits stop a swarm; these tell a person. The Alerts page groups kinds into Runs, Access, and Swarms and offers the matching scope fields; `agentmesh alerts add` gains `--swarm` and `--access-kind`; `GET /api/alerts/kinds` now returns those groups. See [docs/alerts.md](docs/alerts.md#swarm-and-egress-anomalies).
+- **Egress and data access.** AgentMesh records every host an agent reached and every store it read or wrote — from HTTP span attributes, URLs in tool arguments, retrievals, memory operations, `db.system` / `file.path`, and `agentmesh.record_access(...)`. The new **Access** page lists destinations and resources with accesses, agents, errors, and a **new** flag for anything first seen in the range; traces show a **Reached** card and swarms an **Access** tab. Policy rules match on `host`, so `except: {host: [...]}` is an allowlist enforced before the call is made. `GET /api/access`, `GET /api/access/summary`, `agentmesh access summary | list`, and the MCP tool `list_access`. See [docs/access.md](docs/access.md).
+- **Agent swarms.** Many agents across traces and processes, grouped into one run. Traces join a swarm through the `agentmesh.swarm.id` attribute (resource or span) or a span link to a trace already in it. The **Swarms** page lists swarm runs and shows each as an agent graph (who started whom, messages, handoffs; grouped by role above 120 agents), activity over time, per-agent calls, tokens, and cost, and insights for failed agents, runaway fan-out, deep nesting, and cost hotspots. **Stop swarm** halts every agent in it. See [docs/swarms.md](docs/swarms.md).
+- **Swarm-wide limits.** A policy's `swarm:` block caps a whole swarm across every process — `max_agents`, `max_concurrent_agents`, `max_spawn_rate_per_minute`, `max_cost_usd`, `max_tokens`, `max_duration_minutes`, with an optional `match` on swarm name, service, or environment. The server evaluates them on a schedule (`AGENTMESH_SWARM_LIMIT_INTERVAL_SECONDS`, default 15) and halts a swarm that breaks one; `monitor` mode records the breach instead. A limit halts a swarm once, so releasing the halt is not undone by the next check. `agentmesh swarms check` and `POST /api/swarms/check` run a check on demand (`--no-enforce` is a dry run), and the Swarms page shows usage against every limit.
+- Python SDK: `agentmesh.swarm()`, `agentmesh.swarm_context()`, `agentmesh.trace(..., spawned_by=context)`, `agentmesh.send_message()`, `agentmesh.handoff()`, `Span.add_link()`, and `AGENTMESH_SWARM_ID` / `AGENTMESH_SWARM_NAME`.
+- OpenTelemetry span links are ingested (OTLP JSON and protobuf) and exported by the SDK.
+- `GET /api/swarms`, `GET /api/swarms/{swarm_id}`, `swarms` on trace detail, `agentmesh swarms list | show`, MCP tools `list_swarms` and `get_swarm`, and the `swarm` halt scope (`agentmesh halt create --swarm`).
+- `examples/agent_swarm.py`; the demo seed adds two swarms.
+- **Guardrails.** Policies checked before every tool call, LLM call, and agent start in the Python SDK (`@observe`, `span()`), OpenAI and Anthropic instrumentation (before the HTTP request), and the AgentMesh runtime. Rules match on tool, model, agent, service, environment, arguments, or an input regex and `deny`, `require_approval`, `warn`, or `allow`. Per-trace limits stop tool loops (`max_repeated_calls`), runaway spend and tokens, long runs, deep agent nesting, and swarm fan-out. `monitor` mode records what would be blocked without blocking. Blocked calls raise `agentmesh.PolicyViolation`. See [docs/guardrails.md](docs/guardrails.md).
+- **Kill switch.** Halt a trace, an agent, a service, or everything from the dashboard, `agentmesh halt create`, or `POST /api/halts`; running agents stop at their next call (`AgentHalted`) within seconds. Halts and releases are audited.
+- **Approvals page** in the dashboard: pending and resolved reviews with the tool, its arguments, the agent that asked, the risk level, a link to the trace, and Approve/Reject; the demo seeds a pending review queue.
+- **Access page** in the dashboard (under Monitor): destinations and resources for the selected range with accesses, agents, traces, errors, last use, and a **new** flag, plus per-destination drill-down.
+- **Blocking approvals.** `require_approval` pauses the call until a reviewer answers on the Approvals page, without blocking the event loop in async code; unanswered requests are denied after `approval.timeout_seconds`.
+- **Policy simulation.** Replay recorded traces through a draft or saved policy to see which traces and calls it would have stopped: dashboard editor, `agentmesh policy simulate`, `POST /api/policies/simulate`.
+- **Guardrails page** in the dashboard: active halts, blocked/approval/would-block counts, policies with a YAML editor and templates, decisions log, and halt history. Traces stopped by a policy show a callout with each stopped call. `g r` opens the page.
+- `agentmesh policy validate | apply | list | show | enable | disable | remove | simulate | decisions` and `agentmesh halt create | list | release`.
+- Policy, decision, halt, runtime-config, and approval-request endpoints under `/api/policies`, `/api/policy-decisions`, `/api/halts`, `/api/guardrails/*`, and `/api/approvals`.
+- `agentmesh.init(policies=[...], guardrails=True)`, plus `AGENTMESH_POLICY_FILE`, `AGENTMESH_GUARDRAILS`, `AGENTMESH_GUARDRAILS_REFRESH_SECONDS`, and `AGENTMESH_GUARDRAILS_FAIL_CLOSED`.
+- `examples/guardrails.py` and `examples/policies/production-safety.yaml`.
+
+### Changed
+- PyYAML is now a dependency (policies are written in YAML).
+- `agentmesh traces prune` now also deletes the pruned traces' guardrail decisions, swarm membership, span links, and agent messages, and drops swarms that have no traces left.
+
+### Fixed
+- Dashboard side panels and toasts were positioned relative to the page instead of the window after the page's entry animation, so a panel opened on a scrolled page could appear offset.
+
+---
+
+## [0.4.2] — 2026-09-15
+
+The redesigned dashboard. No changes to the Python tracing API or the TypeScript SDK code; `agentmesh-sdk` 0.4.2 is published to keep the versions aligned.
+
+### Changed
+- **Redesigned dashboard.** A new app shell with a grouped, collapsible sidebar (with firing-alert and pending-approval badges), breadcrumbs, a global time range and data scope, a live-stream indicator, and a Ctrl/⌘ K command palette for pages, traces, and sessions. Light, dark, and system themes, saved per browser and applied before first paint.
+- **Overview** now shows KPI cards with sparklines, trace volume and latency charts for the selected range, failures grouped into issues (count, wasted spend, last seen), spend by model, recent traces, provider health, and live activity.
+- **Traces**: a dense sortable table with a volume histogram, search, status and model filters, and failed rows marked. The trace view combines the span tree and waterfall into one collapsible timeline with span-kind icons, opens failed traces on their root-cause span, steps to the previous or next trace, and shows the selected span in a side panel whose Input and Output render chat messages (including OpenTelemetry GenAI `parts`) as a conversation.
+- Every other page is rebuilt on shared components: Sessions as a chat transcript, experiments with score bars and highlighted regressions, Alerts with state filters and a rule menu, Costs with budget progress and spend over time, Models with a health card per provider, Agents as cards, Tools with per-tool stats, tabbed Memory & RAG, an approvals inbox, and side panels for create forms and record details. The workflow graph lays nodes out left to right.
+- Links keep the page, trace, time range, and trace filters in the address bar (`/?page=costs&range=7d`, `/?trace=<id>`, `/?page=traces&status=failed`).
+
+### Added
+- **Trace comparison** in the dashboard: pick any trace (other runs of the same workflow first) and see metric differences and every execution step aligned between the two runs, with steps only one run took, status changes, and duration changes. Replaces the previous event-count comparison.
+- **Timeline tools**: find spans by name, event, agent, model, tool, or error; show failed spans only; expand or collapse the whole tree.
+- **Keyboard shortcuts**: `?` lists them; `/` opens search; `g` then a letter goes to a page; in a trace, `j`/`k` move between spans, `[`/`]` switch traces, `c` opens Compare, and `Esc` returns to the list.
+- **Traces list**: load older traces beyond the first 500, and export the list as CSV.
+
+### Removed
+- The dashboard's background image and its `/vision-space.svg` route.
+
+---
+
+## [0.4.1] — 2026-09-15
+
+A packaging and release-process update. No changes to the Python package or TypeScript SDK code.
+
+### Changed
+- The PyPI project page no longer says to install from a clone until 0.4.0 is published, and mentions the `postgres` extra.
+- The Release workflow now also publishes `agentmesh-sdk` to npm with trusted publishing (OIDC, no stored token, with provenance). It skips when the SDK version is already on npm and fails when the tag and SDK version disagree. `CONTRIBUTING.md` documents the release steps.
+- `agentmesh-sdk` 0.4.1 is the first npm release published by the workflow; the dashboard and SDK versions follow the Python package.
+
+---
+
+## [0.4.0] — 2026-09-14
+
+AgentMesh becomes framework-agnostic: observe agents built with anything, not only the AgentMesh runtime, test changes with datasets and experiments, get alerted, and run on PostgreSQL.
+
+### Added
+- **Datasets and experiments** (`agentmesh.datasets`, `agentmesh.experiments`): datasets from traces (dashboard **Add to dataset**, `add_trace_to_dataset`), JSONL, or by hand; `agentmesh.run_experiment` / `arun_experiment` run any sync or async task over a dataset with each item in its own trace; item-by-item `compare_experiments` (regressions, improvements, score/cost/latency deltas). Works against the local database or a remote server. REST API under `/api/datasets` and `/api/experiments`; CLI `agentmesh datasets ...` and `agentmesh experiments list|show|compare|run` with `--fail-under` and `--fail-on-regression` for CI.
+- **Evaluators** (`agentmesh.evaluators`): `ExactMatch`, `Contains`, `RegexMatch`, `JSONValid`, `Similarity`, `@evaluator` for custom functions, and **`LLMJudge`** (any judge function or `ModelProvider`; presets for correctness, helpfulness, conciseness, faithfulness, harmlessness; score scales and thresholds; robust reply parsing). `agentmesh.evaluate_traces` scores recorded production traces.
+- **Alerts** (`agentmesh.alerts`): rules for failure rate, failed runs, spend, expensive traces, p95 latency, and tool loops, with workflow/environment/service/source filters, windows, cooldowns, reminders, and resolved notifications. Delivery to Slack, Discord, or JSON webhooks with optional HMAC-SHA256 signatures. A background scheduler in the server (`AGENTMESH_ALERT_INTERVAL_SECONDS`), `/api/alerts/*`, and `agentmesh alerts add|list|update|remove|check|test|history`.
+- **TypeScript SDK** (`sdks/typescript`, npm `agentmesh-sdk`): `init`, `observe`, `trace`, `span`, `startSpan`/`withActiveSpan`, `score`, `updateCurrentTrace`; OTLP/JSON exporter with batching and retries; `instrumentOpenAI` (Chat Completions, Responses, Embeddings, streaming, `.withResponse()`) and `instrumentAnthropic` (`messages.create`, `stream: true`, `messages.stream()`); `runExperiment` with `exactMatch`, `contains`, and `llmJudge`. ESM and CommonJS builds, Node.js 18+, no runtime dependencies.
+- **PostgreSQL for every feature.** `PostgreSQLStore` now shares all queries with the SQLite store through a dialect-translating connection adapter, so OTLP/SDK ingestion, sessions, scores, insights, datasets, experiments, alerts, the runtime, and the MCP server work on `postgresql://` URLs. Works behind PgBouncer-style poolers (no server-side prepared statements). The test suite runs every storage test against both databases when `AGENTMESH_TEST_POSTGRES_URL` is set; CI runs it on PostgreSQL 17. `docker-compose.postgres.yml` runs the stack on PostgreSQL.
+- Dashboard: **Datasets & Evals** page (datasets, items, experiments with per-evaluator scores, experiment detail, and comparison), **Alerts** page (rules, create/test/enable, history), **Add to dataset** on trace detail, a TypeScript snippet on **Connect**, and deep links (`/?trace=<id>`, `/?page=datasets&experiment=<id>`).
+- MCP tools `list_experiments`, `compare_experiments`, and `list_alerts`.
+- Demo data now includes a support dataset, two experiment runs with an LLM-judge-style evaluator, and alert rules; screenshots add `datasets-experiments.png`, `experiment-compare.png`, and `alerts.png`.
+- Docs: `docs/datasets-and-experiments.md`, `docs/alerts.md`, `docs/typescript-sdk.md`; `docs/evaluations.md` rewritten to match the API. Example: `examples/datasets_experiments.py`; TypeScript examples in `sdks/typescript/examples`.
+- **OTLP/HTTP trace receiver** at `POST /v1/traces` (JSON always; protobuf with the new `otlp` extra; gzip/deflate bodies). Any OpenTelemetry exporter or Collector can send traces to AgentMesh.
+- **Semantic mapping** (`agentmesh.ingest`) for the OpenTelemetry GenAI conventions (including `gen_ai.usage.cache_read/cache_write.input_tokens`, `gen_ai.usage.reasoning.output_tokens`, `gen_ai.conversation.id`, agent/tool/workflow/retrieval/memory operations, `gen_ai.evaluation.result` events, MCP spans), OpenInference, OpenLLMetry/Traceloop, and Vercel AI SDK attributes. Out-of-order batches and re-delivery are handled idempotently; aggregate wrapper spans are never double-counted.
+- **Python tracing SDK** (`agentmesh.sdk`, re-exported at top level): `init`, `@observe` (sync, async, generators), `trace`, `span`, `score`, `update_current_trace`, `flush`; local-SQLite and HTTP (OTLP/JSON) exporters with a background batch processor; `InMemoryExporter` for tests.
+- **Auto-instrumentation** for the `openai` client (Chat Completions, Responses, Embeddings; sync/async; streaming with tool-call accumulation) and the `anthropic` client (`messages.create`, `stream=True`, `messages.stream()`; Bedrock/Vertex provider detection; cache token normalization).
+- **Sessions, users, and tags** on traces; `GET /api/sessions`, `GET /api/sessions/{id}`, `session_id`/`user_id`/`tag`/`source` trace filters; `agentmesh sessions list|show`.
+- **Scores and feedback**: `POST /api/scores`, `GET /api/scores`, `GET /api/traces/{id}/scores`, SDK `score()`, dashboard thumbs up/down.
+- **Automatic trace insights** (`agentmesh.analysis`): first failure with causal path, tool-call loops, repeated identical prompts, context-window growth, prompt-cache hit rate, unpriced models, self-time and cost hotspots. `GET /api/traces/{id}/insights`, `agentmesh traces insights`.
+- **MCP server** (`agentmesh mcp`, stdio, no extra dependencies) with `list_traces`, `get_trace`, `get_span`, `diagnose_trace`, `search_spans`, `cost_summary`, `list_sessions`, `get_session`, `add_score`.
+- **Retention**: `agentmesh traces prune --older-than 30d [--dry-run] [--vacuum]`.
+- **Privacy controls**: `AGENTMESH_CAPTURE_CONTENT=false`, `AGENTMESH_MAX_CONTENT_CHARS`, SDK `capture_content=False`.
+- `agentmesh ingest <file>` for OTLP/JSON trace files; `GET /api/integrations`; `GET /api/pricing`.
+- Dashboard: **Sessions** page, **Connect** page (endpoint + setup snippets), Insights & Scores panel, span names in the span tree and waterfall, session/user/source/tag badges.
+- Dashboard works with API-key auth: it prompts for the key on `401`, keeps it in the browser, and sends it on every request and on the live event stream (now read with `fetch` instead of `EventSource`, which cannot send headers).
+- `AGENTMESH_MAX_OTLP_BYTES` (default 32 MiB) limits `/v1/traces` request bodies before and after decompression; oversized requests get `413`.
+- Demo data now includes a three-turn OpenTelemetry-style support session with a tool loop.
+- Docs: `docs/integrations.md`, `docs/sdk.md`, `docs/mcp.md`, a rewritten `docs/opentelemetry.md`, and a new "any framework" section in `HOW_IT_WORKS.md`. Examples: `sdk_quickstart.py`, `otel_genai_export.py`, `llm_client_auto_instrumentation.py`.
+- README: architecture diagram, FAQ, and a refreshed screenshot gallery including the new Sessions, Trace Insights, and Connect pages (`npm run screenshots` now captures all eight).
+
+### Changed
+- **Pricing rewritten** to USD per million tokens with separate cache-read and cache-write rates. Built-in prices for current Claude models (Fable 5.1, Fable 5, Opus 5, Opus 4.5–4.8, Sonnet 5, Sonnet 4.x, Haiku 4.5) from Anthropic's pricing page, Gemini 2.5, and common OpenAI models. Model IDs are normalized (dated snapshots, Bedrock and Vertex IDs). New `agentmesh pricing sync|show|list` and `AGENTMESH_PRICING_FILE`. The v0.3 `*_per_1k` override format and the documented `{"model": {"prompt": ..., "completion": ...}}` shorthand are still accepted, and `AGENTMESH_PRICING_JSON` may now be a file path.
+- Token semantics follow the GenAI conventions: prompt tokens include cached tokens; completion tokens include reasoning tokens. The Anthropic and OpenAI-compatible providers now report cache tokens.
+- `AnthropicProvider` default model is now `claude-sonnet-5`.
+- Claude 4.6+ models report a 1M-token context window.
+- API auth accepts `X-AgentMesh-Api-Key` in addition to `Authorization: Bearer`, and compares keys in constant time.
+- The CLI `--db` default honours `AGENTMESH_DB_URL`.
+- Provider catalog no longer labels the implemented Anthropic, Gemini, Azure OpenAI and vLLM adapters as "planned".
+- **`docker-compose.yml` publishes port 8787 on `127.0.0.1` only** and passes `AGENTMESH_AUTH_MODE`, `AGENTMESH_API_KEY`, `AGENTMESH_CAPTURE_CONTENT`, and `AGENTMESH_MAX_OTLP_BYTES` through from `.env`. If you reached the container from another machine, set an API key and change the port mapping (see `docs/docker.md`).
+- The evaluation summary averages only 0–1 scores as task success and computes the pass rate over records with an explicit pass/fail, so arbitrary-scale scores no longer distort it.
+- **PostgreSQL databases created by the previous adapter are migrated on first connect:** `jsonb` columns in AgentMesh's own tables become `text`, and the foreign keys on `events` and `checkpoints` are dropped to match SQLite. Other applications' tables in the same database are left untouched.
+- `POST /api/scores` accepts `passed`. Docker Compose reads `AGENTMESH_DB_URL` (default: the SQLite volume) and passes the alert settings through; the image installs the `postgres` extra.
+- `GET /api/overview` and `/api/providers/health` commit the provider-health refresh they perform, instead of leaving a write transaction open until the next write.
+
+### Packaging
+- **The PyPI wheel now ships the React dashboard.** A `setup.py` build hook copies `dashboard/dist` into the wheel as `agentmesh/dashboard_dist`, and `MANIFEST.in` carries it through the sdist. Previously `pip install agentmesh-ai` only served the minimal fallback page because the dashboard was looked up relative to a source checkout.
+- The server resolves the dashboard from `AGENTMESH_DASHBOARD_DIR`, then a source checkout's `dashboard/dist` (editable installs, Docker), then the bundled copy. `agentmesh doctor` reports which directory is used.
+- The release workflow builds the dashboard with npm before `python -m build`, sets `AGENTMESH_REQUIRE_DASHBOARD=1` so a wheel without the UI fails the build, and asserts the wheel contents. CI builds the wheel, installs it in a clean venv, and checks that the page and its assets are served.
+
+### Fixed
+- `new_id()` derived IDs from a hash of the current timestamp, so IDs minted in the same clock tick could collide; IDs are now random.
+- Evaluations saved within the same second overwrote each other (IDs were `eval_<unix seconds>`).
+- The live event stream (`/api/events/stream`, `/ws/events`) read the *oldest* 250 events, so it stopped reporting activity once a database held more than 250 events.
+- `/ws/events` and `POST /api/jobs/compact` could not resolve their `WebSocket`/`BackgroundTasks` parameters (imported inside `create_app` while annotations are strings), so FastAPI treated them as required query parameters.
+- The dashboard background image (`/vision-space.svg`) returned 404 when served by the Python server.
+- **Security:** `WS /ws/events` accepted connections without the API key in `api_key` mode, streaming every event payload to any client. It now requires the same key as the REST API.
+- **Security:** the runtime OpenTelemetry bridge (`configure_opentelemetry`) sent event payloads to the collector without secret redaction.
+- The Workflows page and `/api/workflows` multiplied run counts, failed runs, and latency by the number of model calls per run (joined cost records row by row).
+- The dashboard was unusable with `AGENTMESH_AUTH_MODE=api_key` because it never sent the key.
+- `docs/docker.md` suggested `docker compose up -e ...`, which is not a valid flag, and `.env` auth settings were ignored by the compose file.
+
+---
+
+## Changes between 0.3.0-alpha and 0.4.0 (released as part of 0.4.0)
+
+### Added
+- `HOW_IT_WORKS.md` — 21 Mermaid diagrams covering architecture, sequence flows, DAG execution, RAG, cost governance, replay, and time-travel debugging.
+- Full docs overhaul: all 23 `docs/` files rewritten with code examples, replacing stub content generated by Codex.
+- `docs/README.md` — index of all docs with quick-start learning paths.
+- `CITATION.cff` — academic citation file for research use.
+- `docs/cli.md` — grouped CLI reference for all commands.
+- `.github/ISSUE_TEMPLATE/config.yml` — routes blank issues to Discussions and security issues to Security Advisories.
+- `dotenv` extras (`pip install -e ".[dotenv]"`) for automatic `.env` loading.
+- OIDC trusted publishing to PyPI in `.github/workflows/release.yml` — no API tokens needed.
+- `pip cache` step in CI for faster build times.
+
+### Changed
+- `BudgetLimiter` converted from `@dataclass` to a plain class with `threading.Lock` — eliminates race conditions when parallel steps check/update the budget simultaneously.
+- `RetryPolicy.delay_for()` now uses full-jitter (`random.uniform(0, base)`) instead of pure exponential backoff — prevents thundering-herd when many retries fire at once.
+- Independent tool calls within a single agent step now run concurrently with `asyncio.gather` instead of sequentially.
+- `ReplayEngine.replay()` queries `list_checkpoints` once and reuses the result instead of querying twice.
+- `get_trace_detail()` skips the `diagnose()` call for succeeded traces — only failed and cancelled traces pay the diagnosis cost.
+- Token estimation uses character-count (`len(text) // 4`) instead of word-count — closer to real BPE tokeniser output for English prose.
+- CLI `main()` calls `_load_dotenv()` on startup — `.env` is automatically loaded if `python-dotenv` is installed.
+- `agentmesh doctor` now checks `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `VLLM_BASE_URL`, and `dashboard_built` in addition to prior checks; uses `COUNT(*)` SQL instead of loading all traces.
+- `Setup.md` section 21 updated to remove deleted `docs/getting-started.md` reference.
+- 14 redundant/placeholder markdown files deleted: `docs/architecture.md`, `docs/contributing.md`, `docs/costs.md`, `docs/getting-started.md`, `docs/installation.md`, `docs/memory-rag.md`, `docs/models.md`, `docs/quickstart.md`, `docs/roadmap.md`, and 5 `apps/`/`packages/` placeholder READMEs.
+
+### Fixed
+- `pyproject.toml` section ordering corrected — `keywords` and `classifiers` were being parsed as `[project.urls]` entries instead of `[project]` entries.
+- `pytest` and `pytest-asyncio` removed from main `[project.dependencies]` — they belong in `[dev]` extras only.
+
+---
+
+## [0.3.0-alpha] — 2025-05-01
+
+### Added
+- Trace-first React dashboard: trace detail cockpit, span tree, waterfall timeline, inspector tabs, OTEL JSON export action.
+- Failure Inbox, Provider Health panel, React Flow workflow graph, TanStack trace tables.
+- Replay Studio: deterministic, simulated, and live replay from any checkpoint.
+- Cost Center: spend analytics by workflow/agent/model/provider, budget usage, failed-run waste, cache savings.
+- Tool Inspector: permissions, approval status, side effects, sandbox logs, MCP metadata.
+- Memory & RAG inspector: versioned records, retrieved chunks, similarity scores, source metadata.
+- Prompt registry with version history.
+- OpenTelemetry-compatible JSON export via FastAPI and CLI (`--format otel-json`).
+- API key auth mode (`AGENTMESH_AUTH_MODE=api_key`).
+- Docker Compose one-command SQLite dashboard demo.
+- Smoke test suite and deterministic screenshot generation.
+- `agentmesh doctor` and `agentmesh validate traces` CLI commands.
+
+### Changed
+- Componentized React dashboard structure with reusable layout, trace, provider, workflow, and table components.
+- Improved trace list usability: primary Open action near the left, sticky actions, row hover/selected states, provider/model tooltips.
+- Hardened fresh-clone flow with explicit Windows/macOS/Linux commands.
+- Expanded secret redaction coverage for logs, persisted JSON, and exports.
+- CI: trace validation, demo seed, and dashboard smoke tests on Python 3.11/3.12/3.13.
+
+### Fixed
+- Deterministic replay correctly reconstructs prompts, tool calls, memory state, and checkpoints.
+- Provider adapter tests no longer require real API keys.
+
+---
+
+## [0.1.0] — 2025-02-01
+
+### Added
+- Async multi-agent workflow runtime: sequential, parallel, hierarchical, and event-driven modes.
+- Trace-first SQLite and PostgreSQL persistence for workflows, spans, model calls, tool calls, memory, RAG, approvals, costs, retries, and errors.
+- ReplayEngine, TimeTravelDebugger, and FailedRunDiagnosis.
+- FastAPI dashboard API: REST, SSE, WebSocket, health, metrics, and structured errors.
+- React + TypeScript + TailwindCSS dashboard with Recharts analytics.
+- 7 model providers: Mock, OpenAI-compatible, Ollama, Anthropic, Gemini, vLLM, Router.
+- Typed tools, permission levels, human approval workflow, tool sandboxing.
+- SQLite memory store with versioning and audit logs.
+- FAISS and SQLite vector stores with cosine similarity for RAG.
+- Cost tracking and pricing for major LLM providers.
+- Retry policies (exponential backoff), budget limiter, circuit breaker, rate limiter.
+- Plugin system with `AgentMeshPlugin` protocol.
+- NATS and Redis event bus adapters for distributed coordination.
+- CLI: `init`, `run`, `dashboard`, `traces`, `replay`, `export`, `import`, `diagnose`, `costs`, `demo`, `version`.
+- 20 runnable examples.
+- Dockerfile, Docker Compose, CI pipeline.
+- OpenTelemetry bridge and OTLP export foundation.
