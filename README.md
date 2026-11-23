@@ -1,4 +1,4 @@
-# AgentMesh
+# Verity
 
 [![CI](https://github.com/raghuece455/AgentMesh/actions/workflows/ci.yml/badge.svg)](https://github.com/raghuece455/AgentMesh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -8,7 +8,7 @@
 [![MCP](https://img.shields.io/badge/MCP-server-black.svg)](docs/mcp.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**AgentMesh is free, open-source, self-hosted observability and guardrails for AI agents and agent swarms: traces, swarm graphs, sessions, costs, automatic debugging insights, evaluations, alerts, policies, and a kill switch — for agents built with any framework, in Python or TypeScript.**
+**Verity is free, open-source, self-hosted observability and guardrails for AI agents and agent swarms: traces, swarm graphs, sessions, costs, automatic debugging insights, evaluations, alerts, policies, and a kill switch — for agents built with any framework, in Python or TypeScript.**
 
 Agent runs are hard to debug once prompts, tools, retrieval, retries, sub-agents, and humans start influencing each other. AgentMesh records every run as an inspectable trace so you can answer *what happened*, *which step broke first*, *is it looping*, *how much it cost*, and *where the time went*.
 
