@@ -1,0 +1,119 @@
+import type {
+  AgentSummary,
+  ApprovalRecord,
+  Checkpoint,
+  CostCenterSummary,
+  EvaluationRecord,
+  EvaluationSummary,
+  IntegrationInfo,
+  JsonRecord,
+  SessionSummary,
+  MemoryOperation,
+  MemoryRecord,
+  ModelCallRecord,
+  ModelUsage,
+  OverviewData,
+  PromptSummary,
+  ProviderHealth,
+  RagRetrieval,
+  ToolCallRecord,
+  TraceSummary,
+  WorkflowSummary,
+} from './types'
+
+export type Section =
+  | 'overview'
+  | 'traces'
+  | 'sessions'
+  | 'swarms'
+  | 'datasets'
+  | 'alerts'
+  | 'connect'
+  | 'workflows'
+  | 'agents'
+  | 'models'
+  | 'tools'
+  | 'access'
+  | 'memory'
+  | 'prompts'
+  | 'costs'
+  | 'evaluations'
+  | 'guardrails'
+  | 'approvals'
+  | 'replay'
+  | 'settings'
+
+export interface DashboardData {
+  overview: OverviewData | null
+  traces: TraceSummary[]
+  workflows: WorkflowSummary[]
+  agents: AgentSummary[]
+  providers: ProviderHealth[]
+  models: ModelUsage[]
+  modelCalls: ModelCallRecord[]
+  costs: CostCenterSummary | null
+  costByWorkflow: JsonRecord[]
+  costByAgent: JsonRecord[]
+  costByModel: JsonRecord[]
+  costByProvider: JsonRecord[]
+  costByFailedRun: JsonRecord[]
+  toolCalls: ToolCallRecord[]
+  memoryRecords: MemoryRecord[]
+  memoryOperations: MemoryOperation[]
+  ragRetrievals: RagRetrieval[]
+  prompts: PromptSummary[]
+  evaluations: EvaluationRecord[]
+  evaluationSummary: EvaluationSummary | null
+  approvals: ApprovalRecord[]
+  checkpoints: Checkpoint[]
+  auditLogs: JsonRecord[]
+  sessions: SessionSummary[]
+  integrations: IntegrationInfo | null
+}
+
+export type LiveStatus = 'connecting' | 'connected' | 'disconnected'
+
+export interface ConnectionState {
+  backendStatus: 'checking' | 'ok' | 'failed'
+  liveStatus: LiveStatus
+  lastSuccessfulRefresh: string | null
+  lastFailedEndpoint: string | null
+  lastError: string | null
+  lastUpdated: string | null
+  lastLiveEvent: string | null
+  retryCount: number
+}
+
+export interface LiveEventRecord {
+  type: string
+  at: string
+  trace_id?: string
+}
+
+export const emptyData: DashboardData = {
+  overview: null,
+  traces: [],
+  workflows: [],
+  agents: [],
+  providers: [],
+  models: [],
+  modelCalls: [],
+  costs: null,
+  costByWorkflow: [],
+  costByAgent: [],
+  costByModel: [],
+  costByProvider: [],
+  costByFailedRun: [],
+  toolCalls: [],
+  memoryRecords: [],
+  memoryOperations: [],
+  ragRetrievals: [],
+  prompts: [],
+  evaluations: [],
+  evaluationSummary: null,
+  approvals: [],
+  checkpoints: [],
+  auditLogs: [],
+  sessions: [],
+  integrations: null,
+}
